@@ -10,22 +10,7 @@ import com.google.common.collect.Multimaps;
 import com.google.common.collect.SetMultimap;
 import com.mojang.logging.LogUtils;
 import cpw.mods.modlauncher.api.LamdbaExceptionUtils;
-import java.lang.annotation.Annotation;
-import java.lang.annotation.ElementType;
-import java.lang.invoke.MethodHandle;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.EnumMap;
-import java.util.EnumSet;
-import java.util.HashSet;
-import java.util.List;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
-import javax.annotation.Nullable;
+import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
@@ -41,12 +26,30 @@ import net.neoforged.testframework.annotation.OnInit;
 import net.neoforged.testframework.annotation.RegisterStructureTemplate;
 import net.neoforged.testframework.annotation.TestGroup;
 import net.neoforged.testframework.gametest.ExtendedGameTestHelper;
+import net.neoforged.testframework.gametest.GameTestHelperFactory;
 import net.neoforged.testframework.gametest.StructureTemplateBuilder;
 import net.neoforged.testframework.impl.test.MethodBasedEventTest;
 import net.neoforged.testframework.impl.test.MethodBasedGameTestTest;
 import net.neoforged.testframework.impl.test.MethodBasedTest;
 import net.neoforged.testframework.registration.RegistrationHelper;
 import org.objectweb.asm.Type;
+
+import javax.annotation.Nullable;
+import java.lang.annotation.Annotation;
+import java.lang.annotation.ElementType;
+import java.lang.invoke.MethodHandle;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 public final class FrameworkCollectors {
     private static final Predicate<ModFileScanData.AnnotationData> SIDE_FILTER = data -> {
@@ -86,7 +89,7 @@ public final class FrameworkCollectors {
 
         public static List<Test> forGameTestMethodsWithAnnotation(ModContainer container, Class<? extends Annotation> annotation) {
             return findMethodsWithAnnotation(container, SIDE_FILTER, annotation)
-                    .filter(method -> method.getParameterTypes().length == 1 && method.getParameterTypes()[0].isAssignableFrom(ExtendedGameTestHelper.class))
+                    .filter(method -> method.getParameterTypes().length == 1 && GameTestHelper.class.isAssignableFrom(method.getParameterTypes()[0]))
                     .filter(method -> {
                         if (Modifier.isStatic(method.getModifiers())) {
                             return true;
@@ -94,7 +97,43 @@ public final class FrameworkCollectors {
                         LogUtils.getLogger().warn("Attempted to register method-based gametest test on non-static method: " + method);
                         return false;
                     })
-                    .<Test>map(MethodBasedGameTestTest::new).toList();
+                    .<Test>map(LamdbaExceptionUtils.rethrowFunction(method -> {
+                        if (method.getParameterTypes()[0].isAssignableFrom(ExtendedGameTestHelper.class)) {
+                            return new MethodBasedGameTestTest(method, ExtendedGameTestHelper.class);
+                        }
+
+                        return new MethodBasedGameTestTest(method, method.getParameterTypes()[0]);
+                    })).toList();
+        }
+
+        public static List<Test> forGeneratorMethodsWithAnnotation(ModContainer container, Class<? extends Annotation> annotation) {
+            return findMethodsWithAnnotation(container, SIDE_FILTER, annotation)
+                    .filter(method -> {
+                        if (!Modifier.isStatic(method.getModifiers())) {
+                            LogUtils.getLogger().warn("Attempted to register method-based gametest generator on non-static method: " + method);
+                            return false;
+                        }
+                        if (method.getParameterTypes().length != 0 || !Iterable.class.isAssignableFrom(method.getReturnType())) {
+                            LogUtils.getLogger().warn("Attempted to register method-based gametest generator with invalid signature: " + method);
+                            return false;
+                        }
+
+                        return true;
+                    }).<Test>mapMulti((method, downstream) -> {
+                        try {
+                            var iterable = (Iterable<?>) method.invoke(null);
+
+                            for (Object o : iterable) {
+                                if (!(o instanceof Test test)) {
+                                    LogUtils.getLogger().warn("Attempted to register method-based gametest generator with invalid return type: " + method);
+                                    continue;
+                                }
+                                downstream.accept(test);
+                            }
+                        } catch (Throwable e) {
+                            throw new RuntimeException(e);
+                        }
+                    }).toList();
         }
 
         public static List<Test> eventTestMethodsWithAnnotation(ModContainer container, Class<? extends Annotation> annotation) {

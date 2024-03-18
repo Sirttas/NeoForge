@@ -5,11 +5,6 @@
 
 package net.neoforged.testframework;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.function.Consumer;
-import java.util.stream.Stream;
-import javax.annotation.ParametersAreNonnullByDefault;
 import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -21,6 +16,12 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.testframework.gametest.GameTestData;
 import net.neoforged.testframework.group.Groupable;
 import org.jetbrains.annotations.Nullable;
+
+import javax.annotation.ParametersAreNonnullByDefault;
+import java.util.Collection;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 /**
  * The base interface for tests in the TestFramework.
